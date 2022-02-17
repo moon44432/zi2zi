@@ -3,17 +3,15 @@ from __future__ import print_function
 from __future__ import absolute_import
 
 import argparse
-import sys
 import numpy as np
 import os
 from PIL import Image
 from PIL import ImageDraw
 from PIL import ImageFont
+import glob
 import json
 import collections
-
-reload(sys)
-sys.setdefaultencoding("utf-8")
+from model.utils import centering_image
 
 CN_CHARSET = None
 CN_T_CHARSET = None
@@ -21,22 +19,25 @@ JP_CHARSET = None
 KR_CHARSET = None
 
 DEFAULT_CHARSET = "./charset/cjk.json"
+#DEFAULT_CHARSET = "./charset/ko_complete.json"
 
 
 def load_global_charset():
     global CN_CHARSET, JP_CHARSET, KR_CHARSET, CN_T_CHARSET
     cjk = json.load(open(DEFAULT_CHARSET))
-    CN_CHARSET = cjk["gbk"]
-    JP_CHARSET = cjk["jp"]
+    #CN_CHARSET = cjk["gbk"]
+    #JP_CHARSET = cjk["jp"]
     KR_CHARSET = cjk["kr"]
-    CN_T_CHARSET = cjk["gb2312_t"]
+    #CN_T_CHARSET = cjk["gb2312_t"]
 
 
 def draw_single_char(ch, font, canvas_size, x_offset, y_offset):
     img = Image.new("RGB", (canvas_size, canvas_size), (255, 255, 255))
     draw = ImageDraw.Draw(img)
-    draw.text((x_offset, y_offset), ch, (0, 0, 0), font=font)
-    return img
+    w, h = draw.textsize(ch, font=font)
+    draw.text(((canvas_size-w)/2, (canvas_size-h)/2), ch, (0, 0, 0), font=font)
+    centered = centering_image(np.array(img))
+    return Image.fromarray(centered)
 
 
 def draw_example(ch, src_font, dst_font, canvas_size, x_offset, y_offset, filter_hashes):
@@ -90,6 +91,17 @@ def font2img(src, dst, charset, char_size, canvas_size,
                 print("processed %d chars" % count)
 
 
+def char2img(src, charset, char_size, canvas_size, x_offset, y_offset, sample_dir):
+    src_font = ImageFont.truetype(src, size=char_size)
+    count = 0
+    for c in charset:
+        src_img = draw_single_char(c, src_font, canvas_size, x_offset, y_offset)
+        src_img.save(os.path.join(sample_dir, "%04d.jpg" % count))
+        count += 1
+        if count == 250:
+            break
+
+
 load_global_charset()
 parser = argparse.ArgumentParser(description='Convert font to images')
 parser.add_argument('--src_font', dest='src_font', required=True, help='path of the source font')
@@ -105,16 +117,35 @@ parser.add_argument('--y_offset', dest='y_offset', type=int, default=20, help='y
 parser.add_argument('--sample_count', dest='sample_count', type=int, default=1000, help='number of characters to draw')
 parser.add_argument('--sample_dir', dest='sample_dir', help='directory to save examples')
 parser.add_argument('--label', dest='label', type=int, default=0, help='label as the prefix of examples')
+parser.add_argument('--char2img', dest='char2img', type=int, default=0, help='label as the prefix of examples')
+
 
 args = parser.parse_args()
 
 if __name__ == "__main__":
-    if args.charset in ['CN', 'JP', 'KR', 'CN_T']:
-        charset = locals().get("%s_CHARSET" % args.charset)
+    if args.char2img:
+        if args.charset in ['CN', 'JP', 'KR', 'CN_T']:
+            charset = locals().get("%s_CHARSET" % args.charset)
+        else:
+            charset = [c for c in open(args.charset).readline()[:-1].decode("utf-8")]
+        if args.shuffle:
+            np.random.shuffle(charset)
+
+        char2img(args.src_font, charset, args.char_size, args.canvas_size, args.x_offset, args.y_offset, args.sample_dir)
     else:
-        charset = [c for c in open(args.charset).readline()[:-1].decode("utf-8")]
-    if args.shuffle:
-        np.random.shuffle(charset)
-    font2img(args.src_font, args.dst_font, charset, args.char_size,
-             args.canvas_size, args.x_offset, args.y_offset,
-             args.sample_count, args.sample_dir, args.label, args.filter)
+        font_dir = "./fonts/dest/"
+        font_list = glob.glob(font_dir + "*.ttf")
+
+        i = 0
+
+        for font in font_list:
+            if args.charset in ['CN', 'JP', 'KR', 'CN_T']:
+                charset = locals().get("%s_CHARSET" % args.charset)
+            else:
+                charset = [c for c in open(args.charset).readline()[:-1].decode("utf-8")]
+            if args.shuffle:
+                np.random.shuffle(charset)
+            font2img(args.src_font, font, charset, args.char_size,
+                     args.canvas_size, args.x_offset, args.y_offset,
+                     args.sample_count, args.sample_dir, i, args.filter)
+            i += 1

@@ -10,7 +10,7 @@ import time
 from collections import namedtuple
 from .ops import conv2d, deconv2d, lrelu, fc, batch_norm, init_embedding, conditional_instance_norm
 from .dataset import TrainDataProvider, InjectDataProvider, NeverEndingLoopingProvider
-from .utils import scale_back, merge, save_concat_images
+from .utils import scale_back, merge, save_concat_images, save_images
 
 # Auxiliary wrapper classes
 # Used to save handles(important nodes in computation graph) for later evaluation
@@ -396,6 +396,34 @@ class UNet(object):
             source_iter = source_provider.get_single_embedding_iter(self.batch_size, embedding_id)
         else:
             source_iter = source_provider.get_random_embedding_iter(self.batch_size, embedding_ids)
+
+        tf.global_variables_initializer().run()
+        saver = tf.train.Saver(var_list=self.retrieve_generator_vars())
+        self.restore_model(saver, model_dir)
+
+        def save_imgs(imgs, count):
+            p = os.path.join(save_dir, "inferred_%04d" % count)
+            save_images(imgs, img_path=p, batch_size=self.batch_size)
+            print("generated images saved at %s" % p)
+
+        count = 0
+        batch_buffer = list()
+        for labels, source_imgs in source_iter:
+            fake_imgs = self.generate_fake_samples(source_imgs, labels)[0]
+            merged_fake_images = merge(scale_back(fake_imgs), [self.batch_size, 1])
+            batch_buffer.append(merged_fake_images)
+            if len(batch_buffer) == 1:
+                save_imgs(batch_buffer, count)
+                batch_buffer = list()
+            count += 1
+        if batch_buffer:
+            # last batch
+            save_imgs(batch_buffer, count)
+
+    def test(self, source_obj, embedding_id, model_dir, save_dir):
+        source_provider = InjectDataProvider(source_obj)
+
+        source_iter = source_provider.get_single_embedding_iter(self.batch_size, embedding_id)
 
         tf.global_variables_initializer().run()
         saver = tf.train.Saver(var_list=self.retrieve_generator_vars())
